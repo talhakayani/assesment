@@ -17,14 +17,15 @@ const protect = async (req, res, next) => {
     const decoded = jwt.verify(token, secret);
     const User = getUserModel();
     let user = await User.findById(decoded.id);
+    console.log("🚀 ~ protect ~ user:", user)
     
     // Remove password from user object
     if (user && user.password) {
       const { password, ...userWithoutPassword } = user;
       user = userWithoutPassword;
     }
-    
-    req.user = user;
+    // Mapping the id to the user object
+    req.user = {...user, id: user._id};
     
     if (!req.user || !req.user.isActive) {
       return res.status(401).json({ message: 'User not found or inactive' });

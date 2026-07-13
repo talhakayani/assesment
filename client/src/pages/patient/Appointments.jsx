@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { z } from 'zod';
 import { appointmentService } from '../../services/appointmentService';
 import { userService } from '../../services/userService';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/Card';
@@ -7,6 +8,38 @@ import { Input } from '../../components/Input';
 import { Label } from '../../components/Label';
 import { format } from 'date-fns';
 import { Calendar, Clock, User, X } from 'lucide-react';
+
+const appointmentSchema = z.object({
+  doctor: z.string().min(1, 'Doctor is required'),
+  appointmentDate: z
+    .string()
+    .min(1, 'Date is required')
+    .refine((date) => {
+      const selected = new Date(date);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      return selected > today;
+    }, 'Date must be in the future'),
+  appointmentTime: z
+    .string()
+    .min(1, 'Time is required')
+    .refine((time) => {
+      const [h, m] = time.split(':').map(Number);
+      const mins = h * 60 + m;
+      return mins >= 9 * 60 && mins < 17 * 60;
+    }, 'Time must be between 9 AM and 5 PM'),
+  reason: z.string().trim().min(10, 'Reason must be at least 10 characters'),
+  symptoms: z.string().optional(),
+});
+
+const validate = (data) => {
+  const result = appointmentSchema.safeParse(data);
+  if (result.success) return {};
+  const fieldErrors = result.error.flatten().fieldErrors;
+  return Object.fromEntries(
+    Object.entries(fieldErrors).map(([key, messages]) => [key, messages?.[0]])
+  );
+};
 
 export const Appointments = () => {
   const [appointments, setAppointments] = useState([]);
@@ -20,6 +53,8 @@ export const Appointments = () => {
     reason: '',
     symptoms: '',
   });
+  const [errors, setErrors] = useState({});
+  const [success, setSuccess] = useState('');
 
   useEffect(() => {
     fetchAppointments();
@@ -46,8 +81,22 @@ export const Appointments = () => {
     }
   };
 
+  const handleChange = (e) => {
+    const { id, value } = e.target;
+    const updated = { ...formData, [id]: value };
+    setFormData(updated);
+    setErrors(validate(updated));
+    setSuccess('');
+  };
+
+  const isValid = Object.keys(validate(formData)).length === 0;
+
   const handleSubmit = async (e) => {
     e.preventDefault();
+    const errs = validate(formData);
+    setErrors(errs);
+    if (Object.keys(errs).length > 0) return;
+
     try {
       await appointmentService.create(formData);
       setShowForm(false);
@@ -58,6 +107,8 @@ export const Appointments = () => {
         reason: '',
         symptoms: '',
       });
+      setErrors({});
+      setSuccess('Appointment booked successfully!');
       fetchAppointments();
     } catch (error) {
       alert(error.response?.data?.message || 'Failed to create appointment');
@@ -96,6 +147,12 @@ export const Appointments = () => {
 
   return (
     <div className="space-y-6">
+      {success && (
+        <div className="bg-green-100 text-green-800 px-4 py-3 rounded-md">
+          {success}
+        </div>
+      )}
+
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold">My Appointments</h1>
@@ -118,10 +175,10 @@ export const Appointments = () => {
                   <Label htmlFor="doctor">Doctor</Label>
                   <select
                     id="doctor"
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    className={`flex h-10 w-full rounded-md border bg-background px-3 py-2 text-sm ${errors.doctor ? 'border-red-500' : 'border-input'
+                      }`}
                     value={formData.doctor}
-                    onChange={(e) => setFormData({ ...formData, doctor: e.target.value })}
-                    required
+                    onChange={handleChange}
                   >
                     <option value="">Select a doctor</option>
                     {doctors.map((doctor) => (
@@ -130,6 +187,7 @@ export const Appointments = () => {
                       </option>
                     ))}
                   </select>
+                  {errors.doctor && <p className="text-sm text-red-600">{errors.doctor}</p>}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="appointmentDate">Date</Label>
@@ -137,10 +195,13 @@ export const Appointments = () => {
                     id="appointmentDate"
                     type="date"
                     value={formData.appointmentDate}
-                    onChange={(e) => setFormData({ ...formData, appointmentDate: e.target.value })}
-                    required
+                    onChange={handleChange}
                     min={new Date().toISOString().split('T')[0]}
+                    className={errors.appointmentDate ? 'border-red-500' : ''}
                   />
+                  {errors.appointmentDate && (
+                    <p className="text-sm text-red-600">{errors.appointmentDate}</p>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="appointmentTime">Time</Label>
@@ -148,18 +209,23 @@ export const Appointments = () => {
                     id="appointmentTime"
                     type="time"
                     value={formData.appointmentTime}
-                    onChange={(e) => setFormData({ ...formData, appointmentTime: e.target.value })}
-                    required
+                    onChange={handleChange}
+                    className={errors.appointmentTime ? 'border-red-500' : ''}
                   />
+                  {errors.appointmentTime && (
+                    <p className="text-sm text-red-600">{errors.appointmentTime}</p>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="reason">Reason</Label>
                   <Input
                     id="reason"
                     value={formData.reason}
-                    onChange={(e) => setFormData({ ...formData, reason: e.target.value })}
+                    onChange={handleChange}
                     placeholder="Brief reason for visit"
+                    className={errors.reason ? 'border-red-500' : ''}
                   />
+                  {errors.reason && <p className="text-sm text-red-600">{errors.reason}</p>}
                 </div>
               </div>
               <div className="space-y-2">
@@ -168,12 +234,14 @@ export const Appointments = () => {
                   id="symptoms"
                   className="flex min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                   value={formData.symptoms}
-                  onChange={(e) => setFormData({ ...formData, symptoms: e.target.value })}
+                  onChange={handleChange}
                   placeholder="Describe your symptoms..."
                 />
               </div>
               <div className="flex space-x-2">
-                <Button type="submit">Book Appointment</Button>
+                <Button type="submit" disabled={!isValid}>
+                  Book Appointment
+                </Button>
                 <Button type="button" variant="outline" onClick={() => setShowForm(false)}>
                   Cancel
                 </Button>
@@ -250,4 +318,3 @@ export const Appointments = () => {
     </div>
   );
 };
-
