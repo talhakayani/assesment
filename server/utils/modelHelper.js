@@ -12,9 +12,38 @@ const Appointment = require('../models/Appointment.js');
 const Report = require('../models/Report.js');
 const AIAnalysis = require('../models/AIAnalysis.js');
 
+// Stats cache (5 min TTL) — cleared when a user is created
+const CACHE_TTL = 5 * 60 * 1000;
+const statsCache = {};
+
+const getCachedStats = (key) => {
+  const cached = statsCache[key];
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    return cached.data;
+  }
+  return null;
+};
+
+const setCachedStats = (key, data) => {
+  statsCache[key] = { data, timestamp: Date.now() };
+};
+
+const clearStatsCache = () => {
+  Object.keys(statsCache).forEach((key) => delete statsCache[key]);
+};
+
 // Helper to get the appropriate model/store
 const getUserModel = () => {
-  return getStorageMode() ? userStore : User;
+  const model = getStorageMode() ? userStore : User;
+  const originalCreate = model.create.bind(model);
+
+  model.create = async (...args) => {
+    const user = await originalCreate(...args);
+    clearStatsCache();
+    return user;
+  };
+
+  return model;
 };
 
 const getAppointmentModel = () => {
@@ -72,6 +101,8 @@ module.exports = {
   getAIAnalysisModel,
   populateReference,
   populateReferences,
-  findUserWithPassword
+  findUserWithPassword,
+  getCachedStats,
+  setCachedStats,
+  clearStatsCache
 };
-
