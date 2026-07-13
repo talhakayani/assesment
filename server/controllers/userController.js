@@ -1,4 +1,11 @@
-const { getUserModel, getAppointmentModel, getAIAnalysisModel, getReportModel } = require('../utils/modelHelper.js');
+const {
+  getUserModel,
+  getAppointmentModel,
+  getAIAnalysisModel,
+  getReportModel,
+  getCachedStats,
+  setCachedStats
+} = require('../utils/modelHelper.js');
 
 const getUsers = async (req, res, next) => {
   try {
@@ -128,20 +135,35 @@ const getDashboardStats = async (req, res, next) => {
   try {
     const userId = req.user.id;
     const role = req.user.role;
+    const cacheKey = `${role}_${userId}`;
+
+    const cached = getCachedStats(cacheKey);
+    if (cached) {
+      return res.json({ success: true, stats: cached });
+    }
 
     let stats = {};
-
     const User = getUserModel();
     const Appointment = getAppointmentModel();
     const AIAnalysis = getAIAnalysisModel();
-    
+
     if (role === 'admin') {
-      const totalUsers = await User.countDocuments();
-      const totalPatients = await User.countDocuments({ role: 'patient' });
-      const totalDoctors = await User.countDocuments({ role: 'doctor' });
-      const totalAppointments = await Appointment.countDocuments();
-      const totalAnalyses = await AIAnalysis.countDocuments();
-      const pendingAppointments = await Appointment.countDocuments({ status: 'pending' });
+      // Use counts instead of loading all users into memory
+      const [
+        totalUsers,
+        totalPatients,
+        totalDoctors,
+        totalAppointments,
+        totalAnalyses,
+        pendingAppointments
+      ] = await Promise.all([
+        User.countDocuments(),
+        User.countDocuments({ role: 'patient' }),
+        User.countDocuments({ role: 'doctor' }),
+        Appointment.countDocuments(),
+        AIAnalysis.countDocuments(),
+        Appointment.countDocuments({ status: 'pending' })
+      ]);
 
       stats = {
         totalUsers,
@@ -152,13 +174,19 @@ const getDashboardStats = async (req, res, next) => {
         pendingAppointments
       };
     } else if (role === 'doctor') {
-      const Appointment = getAppointmentModel();
-      const AIAnalysis = getAIAnalysisModel();
-      const myAppointments = await Appointment.countDocuments({ doctor: userId });
-      const pendingAppointments = await Appointment.countDocuments({ doctor: userId, status: 'pending' });
-      const completedAppointments = await Appointment.countDocuments({ doctor: userId, status: 'completed' });
-      const myAnalyses = await AIAnalysis.countDocuments({ doctor: userId });
-      const myPatients = await Appointment.distinct('patient', { doctor: userId });
+      const [
+        myAppointments,
+        pendingAppointments,
+        completedAppointments,
+        myAnalyses,
+        myPatients
+      ] = await Promise.all([
+        Appointment.countDocuments({ doctor: userId }),
+        Appointment.countDocuments({ doctor: userId, status: 'pending' }),
+        Appointment.countDocuments({ doctor: userId, status: 'completed' }),
+        AIAnalysis.countDocuments({ doctor: userId }),
+        Appointment.distinct('patient', { doctor: userId })
+      ]);
 
       stats = {
         myAppointments,
@@ -168,17 +196,18 @@ const getDashboardStats = async (req, res, next) => {
         totalPatients: myPatients.length
       };
     } else if (role === 'patient') {
-      const Appointment = getAppointmentModel();
       const Report = getReportModel();
-      const AIAnalysis = getAIAnalysisModel();
-      const myAppointments = await Appointment.countDocuments({ patient: userId });
-      const upcomingAppointments = await Appointment.countDocuments({ 
-        patient: userId, 
-        status: { $in: ['pending', 'confirmed'] },
-        appointmentDate: { $gte: new Date() }
-      });
-      const myReports = await Report.countDocuments({ patient: userId });
-      const myAnalyses = await AIAnalysis.countDocuments({ patient: userId });
+
+      const [myAppointments, upcomingAppointments, myReports, myAnalyses] = await Promise.all([
+        Appointment.countDocuments({ patient: userId }),
+        Appointment.countDocuments({
+          patient: userId,
+          status: { $in: ['pending', 'confirmed'] },
+          appointmentDate: { $gte: new Date() }
+        }),
+        Report.countDocuments({ patient: userId }),
+        AIAnalysis.countDocuments({ patient: userId })
+      ]);
 
       stats = {
         myAppointments,
@@ -187,6 +216,8 @@ const getDashboardStats = async (req, res, next) => {
         myAnalyses
       };
     }
+
+    setCachedStats(cacheKey, stats);
 
     res.json({
       success: true,
