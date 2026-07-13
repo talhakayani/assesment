@@ -17,6 +17,7 @@ const getUsers = async (req, res, next) => {
       ];
     }
 
+    console.log("🚀 ~ getUsers ~ query:", query)
     let users = await User.find(query);
     
     // Remove passwords and sort

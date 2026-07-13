@@ -17,7 +17,7 @@ router.get('/stats', getDashboardStats);
 router.get('/trends', getHealthTrends);
 
 // Admin only routes
-router.get('/', authorize('admin', 'doctor'), getUsers);
+router.get('/', authorize('admin', 'doctor', 'patient'), getUsers);
 router.get('/:id', authorize('admin', 'doctor'), getUserById);
 router.put('/:id', authorize('admin'), updateUser);
 router.delete('/:id', authorize('admin'), deleteUser);
